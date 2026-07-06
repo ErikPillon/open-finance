@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiteFi Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6">
+    <div class="max-w-5xl mx-auto space-y-6">
+        
+        <header class="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-800 pb-4 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">LiteFi Terminal</h1>
+                <p class="text-sm text-slate-400">Minimalist time-series node visualizer</p>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <select id="tickerSelect" class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="">Loading tickers...</option>
+                </select>
+
+                <select id="resolutionSelect" class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="1d">Daily (1d)</option>
+                    <option value="1h">Hourly (1h)</option>
+                </select>
+
+                <button id="refreshBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2 rounded-lg transition">
+                    Refresh
+                </button>
+            </div>
+        </header>
+
+        <main class="bg-slate-900/50 border border-slate-800 rounded-xl p-6 shadow-xl">
+            <div class="relative w-full h-[450px]">
+                <canvas id="cryptoChart"></canvas>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+        let marketChart = null;
+
+        // Dom Elements
+        const tickerSelect = document.getElementById('tickerSelect');
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const ctx = document.getElementById('cryptoChart').getContext('2d');
+
+        // Initialize App
+        async function init() {
+            await fetchTickers();
+            if (tickerSelect.options.length > 0) {
+                updateChart();
+            }
+            
+            // Event Listeners
+            tickerSelect.addEventListener('change', updateChart);
+            resolutionSelect.addEventListener('change', updateChart);
+            refreshBtn.addEventListener('click', updateChart);
+        }
+
+        // Fetch tracked tickers from backend to fill the dropdown
+        async function fetchTickers() {
+            try {
+                const response = await fetch(`${API_BASE}/tickers`);
+                const tickers = await response.json();
+                
+                tickerSelect.innerHTML = '';
+                tickers.forEach(ticker => {
+                    const option = document.createElement('option');
+                    option.value = ticker;
+                    option.textContent = ticker;
+                    tickerSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Failed to load ticker registry:", err);
+                tickerSelect.innerHTML = '<option value="">Error loading list</option>';
+            }
+        }
+
+        // Pull historical price arrays and render visual nodes
+        async function updateChart() {
+            const ticker = tickerSelect.value;
+            const resolution = resolutionSelect.value;
+            if (!ticker) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/data?tickers=${ticker}&resolution=${resolution}&limit=120`);
+                const payload = await response.json();
+                
+                // Process and sort metrics chronologically
+                const rawData = payload.data || [];
+                const sortedData = rawData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                const labels = sortedData.map(item => {
+                    const d = new Date(item.timestamp);
+                    return resolution === '1h' 
+                        ? d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                        : d.toLocaleDateString();
+                });
+                
+                const closePrices = sortedData.map(item => item.close);
+
+                renderChart(ticker, labels, closePrices);
+            } catch (err) {
+                console.error("Failed to fetch data payload:", err);
+            }
+        }
+
+        // Handle Chart.js initialization and mutations
+        function renderChart(ticker, labels, dataPoints) {
+            if (marketChart) {
+                marketChart.destroy();
+            }
+
+            marketChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${ticker} Close Price`,
+                        data: dataPoints,
+                        borderColor: '#10b981', // Emerald green line
+                        backgroundColor: 'rgba(16, 185, 129, 0.05)',
+                        borderWidth: 2,
+                        pointRadius: 1.5,
+                        hoverRadius: 5,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: '#1e293b' },
+                            ticks: { color: '#94a3b8', maxTicksLimit: 12 }
+                        },
+                        y: {
+                            grid: { color: '#1e293b' },
+                            ticks: { color: '#94a3b8' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Run bootstrap lifecycle
+        init();
+    </script>
+</body>
+</html>
