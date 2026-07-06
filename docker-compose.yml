@@ -1,0 +1,27 @@
+services:
+  questdb:
+    image: questdb/questdb:latest
+    container_name: questdb
+    ports:
+      - "9000:9000"   # Web Console / REST API
+      - "8812:8812"   # Postgres Wire Protocol
+      - "9009:9009"   # InfluxDB Line Protocol (TCP)
+    volumes:
+      - questdb_data:/var/lib/questdb
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: financial_api
+    depends_on:
+      - questdb
+    ports:
+      - "8000:8000"   # FastAPI Endpoint
+    environment:
+      - QUESTDB_HOST=questdb
+    volumes:
+      - ./api:/app
+    restart: unless-stopped
+
+volumes:
+  questdb_data:
