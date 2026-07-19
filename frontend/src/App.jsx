@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Activity, Briefcase } from 'lucide-react';
 import Header from './components/Header.jsx';
 import TickerSelector from './components/TickerSelector.jsx';
 import TickerTracker from './components/TickerTracker.jsx';
 import ChartContainer from './components/ChartContainer.jsx';
 import StatsGrid from './components/StatsGrid.jsx';
+import PortfolioManager from './components/PortfolioManager.jsx';
 
 const API_BASE = 'http://localhost:8000/api';
 
-// Fresh, high-contrast, premium color palette for tickers
 const PRESET_COLORS = [
   '#10b981', // Emerald
   '#6366f1', // Indigo
@@ -20,6 +21,7 @@ const PRESET_COLORS = [
 ];
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState('terminal'); // 'terminal' or 'portfolio'
   const [tickers, setTickers] = useState([]);
   const [selectedTickers, setSelectedTickers] = useState([]);
   const [resolution, setResolution] = useState('1d');
@@ -28,7 +30,25 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
 
-  // Dynamically assign colors to tickers from preset palette for visual consistency
+  // Read current portfolio symbols to ensure we always load their telemetry prices
+  const portfolioSymbols = useMemo(() => {
+    const saved = localStorage.getItem('litefi_portfolio_transactions');
+    if (!saved) return [];
+    try {
+      const txs = JSON.parse(saved);
+      return Array.from(new Set(txs.map(tx => tx.ticker.toUpperCase())));
+    } catch {
+      return [];
+    }
+  }, [activeTab]);
+
+  // Combined list of tickers that we need to fetch data for
+  const tickersToFetch = useMemo(() => {
+    const combined = new Set([...selectedTickers, ...portfolioSymbols]);
+    return Array.from(combined);
+  }, [selectedTickers, portfolioSymbols]);
+
+  // Dynamically assign colors to tickers from preset palette
   const tickerColors = useMemo(() => {
     const mapping = {};
     tickers.forEach((ticker, idx) => {
@@ -37,7 +57,7 @@ export default function App() {
     return mapping;
   }, [tickers]);
 
-  // Fetch the tracked registry of tickers
+  // Fetch tracked registry of tickers
   const fetchTickers = useCallback(async (selectNewTicker = null) => {
     setTickersLoading(true);
     try {
@@ -47,16 +67,13 @@ export default function App() {
         setTickers(data);
         setIsApiConnected(true);
 
-        // Auto-selection heuristic
         if (data.length > 0) {
           if (selectNewTicker && data.includes(selectNewTicker)) {
-            // If we just added a new ticker, add/select it
             setSelectedTickers((prev) => {
               if (prev.includes(selectNewTicker)) return prev;
               return [...prev, selectNewTicker];
             });
           } else if (selectedTickers.length === 0) {
-            // Default select the first ticker on boot
             setSelectedTickers([data[0]]);
           }
         }
@@ -71,15 +88,15 @@ export default function App() {
     }
   }, [selectedTickers]);
 
-  // Fetch telemetry historical price data for active assets
+  // Fetch telemetry historical price data for active + portfolio assets
   const fetchTelemetryData = useCallback(async () => {
-    if (selectedTickers.length === 0) {
+    if (tickersToFetch.length === 0) {
       setRawData([]);
       return;
     }
 
     setDataLoading(true);
-    const tickersParam = selectedTickers.join(',');
+    const tickersParam = tickersToFetch.join(',');
     try {
       const response = await fetch(
         `${API_BASE}/data?tickers=${tickersParam}&resolution=${resolution}&limit=120`
@@ -96,13 +113,12 @@ export default function App() {
     } finally {
       setDataLoading(false);
     }
-  }, [selectedTickers, resolution]);
+  }, [tickersToFetch, resolution]);
 
   // Handle ticker list selections
   const handleToggleTicker = useCallback((ticker) => {
     setSelectedTickers((prev) => {
       if (prev.includes(ticker)) {
-        // Allow deselecting, but keep at least 1 or allow empty for clean state
         return prev.filter((t) => t !== ticker);
       } else {
         return [...prev, ticker];
@@ -110,23 +126,21 @@ export default function App() {
     });
   }, []);
 
-  // Handle successful ingestion from the Ingestion tracker component
   const handleTrackSuccess = useCallback(async (newTicker) => {
     await fetchTickers(newTicker);
   }, [fetchTickers]);
 
   // --- LIFECYCLE ---
-  // Initial bootstrap
   useEffect(() => {
     fetchTickers();
   }, []);
 
-  // Sync historical chart data when selected nodes or resolution changes
+  // Sync historical chart data when selected nodes, portfolio, or resolution changes
   useEffect(() => {
     fetchTelemetryData();
-  }, [selectedTickers, resolution, fetchTelemetryData]);
+  }, [selectedTickers, portfolioSymbols, resolution, fetchTelemetryData]);
 
-  // Light automated polling to update the "Live Node" dashboard every 30 seconds
+  // Light background polling to update terminal data every 30 seconds
   useEffect(() => {
     const timer = setInterval(() => {
       fetchTelemetryData();
@@ -145,37 +159,64 @@ export default function App() {
         isApiConnected={isApiConnected}
       />
 
-      <div className="dashboard-grid">
-        <aside className="sidebar flex flex-col gap-6">
-          <TickerSelector
-            tickers={tickers}
-            selectedTickers={selectedTickers}
-            onToggleTicker={handleToggleTicker}
-            loading={tickersLoading}
-            tickerColors={tickerColors}
-          />
-          <TickerTracker
-            onTrackSuccess={handleTrackSuccess}
-            apiBase={API_BASE}
-          />
-        </aside>
+      {/* Tab Navigation Menu */}
+      <nav className="tab-navigation">
+        <button
+          className={`tab-btn ${activeTab === 'terminal' ? 'active' : ''}`}
+          onClick={() => setActiveTab('terminal')}
+        >
+          <Activity size={16} />
+          <span>Live Terminal</span>
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'portfolio' ? 'active' : ''}`}
+          onClick={() => setActiveTab('portfolio')}
+        >
+          <Briefcase size={16} />
+          <span>Portfolio Manager</span>
+        </button>
+      </nav>
 
-        <section className="main-content flex flex-col gap-6">
-          <ChartContainer
-            rawData={rawData}
-            selectedTickers={selectedTickers}
-            resolution={resolution}
-            loading={dataLoading}
-            tickerColors={tickerColors}
-          />
-          
-          <StatsGrid
-            rawData={rawData}
-            selectedTickers={selectedTickers}
-            tickerColors={tickerColors}
-          />
-        </section>
-      </div>
+      {activeTab === 'terminal' ? (
+        <div className="dashboard-grid animate-fade-in">
+          <aside className="sidebar flex flex-col gap-6">
+            <TickerSelector
+              tickers={tickers}
+              selectedTickers={selectedTickers}
+              onToggleTicker={handleToggleTicker}
+              loading={tickersLoading}
+              tickerColors={tickerColors}
+            />
+            <TickerTracker
+              onTrackSuccess={handleTrackSuccess}
+              apiBase={API_BASE}
+            />
+          </aside>
+
+          <section className="main-content flex flex-col gap-6">
+            <ChartContainer
+              rawData={rawData.filter(d => selectedTickers.includes(d.ticker))}
+              selectedTickers={selectedTickers}
+              resolution={resolution}
+              loading={dataLoading}
+              tickerColors={tickerColors}
+            />
+            
+            <StatsGrid
+              rawData={rawData.filter(d => selectedTickers.includes(d.ticker))}
+              selectedTickers={selectedTickers}
+              tickerColors={tickerColors}
+            />
+          </section>
+        </div>
+      ) : (
+        <PortfolioManager
+          trackedTickers={tickers}
+          telemetryData={rawData}
+          apiBase={API_BASE}
+          onTrackNewTicker={handleTrackSuccess}
+        />
+      )}
     </div>
   );
 }
