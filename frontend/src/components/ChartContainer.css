@@ -1,0 +1,104 @@
+.chart-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 480px;
+}
+
+.title-icon-primary {
+  color: var(--color-primary);
+}
+
+.multi-badge {
+  letter-spacing: 0.05em;
+}
+
+.chart-viewport {
+  position: relative;
+  flex-grow: 1;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(7, 10, 19, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.25rem;
+}
+
+.chart-wrapper {
+  position: absolute;
+  top: 1.25rem;
+  bottom: 1rem;
+  left: 1rem;
+  right: 1.25rem;
+}
+
+/* Loader and Overlay States */
+.chart-overlay-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.state-icon-muted {
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  opacity: 0.6;
+}
+
+.state-icon-warn {
+  color: var(--color-warning);
+  margin-bottom: 1rem;
+  opacity: 0.8;
+  animation: pulse 2.5s infinite ease-in-out;
+}
+
+.state-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.4rem;
+}
+
+.state-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  max-width: 320px;
+  line-height: 1.4;
+}
+
+.chart-loading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.loader-ring {
+  width: 36px;
+  height: 36px;
+  border: 2px solid rgba(16, 185, 129, 0.1);
+  border-top: 2px solid var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.state-text {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--color-primary);
+  letter-spacing: 0.05em;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
