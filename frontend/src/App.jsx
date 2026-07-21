@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Activity, Briefcase } from 'lucide-react';
 import Header from './components/Header.jsx';
 import TickerSelector from './components/TickerSelector.jsx';
@@ -7,7 +7,7 @@ import ChartContainer from './components/ChartContainer.jsx';
 import StatsGrid from './components/StatsGrid.jsx';
 import PortfolioManager from './components/PortfolioManager.jsx';
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = `http://${window.location.hostname}:8000/api`;
 
 const PRESET_COLORS = [
   '#10b981', // Emerald
@@ -29,6 +29,8 @@ export default function App() {
   const [tickersLoading, setTickersLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [isApiConnected, setIsApiConnected] = useState(false);
+  const cachedTickers = useRef(new Set());
+  const cachedResolution = useRef('1d');
 
   // Read current portfolio symbols to ensure we always load their telemetry prices
   const portfolioSymbols = useMemo(() => {
@@ -89,21 +91,34 @@ export default function App() {
   }, [selectedTickers]);
 
   // Fetch telemetry historical price data for active + portfolio assets
-  const fetchTelemetryData = useCallback(async () => {
+  const fetchTelemetryData = useCallback(async (forceRefresh = false) => {
     if (tickersToFetch.length === 0) {
       setRawData([]);
+      cachedTickers.current.clear();
       return;
     }
 
+    const isForced = forceRefresh === true;
+    let uncachedTickers = tickersToFetch;
+    
+    if (!isForced && resolution === cachedResolution.current) {
+      uncachedTickers = tickersToFetch.filter(t => !cachedTickers.current.has(t));
+      if (uncachedTickers.length === 0) return;
+    } else {
+      cachedTickers.current.clear();
+      cachedResolution.current = resolution;
+    }
+
     setDataLoading(true);
-    const tickersParam = tickersToFetch.join(',');
+    const tickersParam = uncachedTickers.join(',');
     try {
       const response = await fetch(
-        `${API_BASE}/data?tickers=${tickersParam}&resolution=${resolution}&limit=120`
+        `${API_BASE}/data?tickers=${tickersParam}&resolution=${resolution}&limit=5000`
       );
       if (response.ok) {
         const payload = await response.json();
-        setRawData(payload.data || []);
+        setRawData(prev => (isForced || cachedTickers.current.size === 0) ? (payload.data || []) : [...prev, ...(payload.data || [])]);
+        uncachedTickers.forEach(t => cachedTickers.current.add(t));
         setIsApiConnected(true);
       } else {
         console.error('Failed to retrieve telemetry data:', response.statusText);
@@ -140,11 +155,11 @@ export default function App() {
     fetchTelemetryData();
   }, [selectedTickers, portfolioSymbols, resolution, fetchTelemetryData]);
 
-  // Light background polling to update terminal data every 30 seconds
+  // Light background polling to update terminal data every 5 minutes
   useEffect(() => {
     const timer = setInterval(() => {
-      fetchTelemetryData();
-    }, 30000);
+      fetchTelemetryData(true);
+    }, 300000);
 
     return () => clearInterval(timer);
   }, [fetchTelemetryData]);

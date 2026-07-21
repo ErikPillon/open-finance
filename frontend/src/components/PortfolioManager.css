@@ -345,3 +345,125 @@
   color: var(--color-danger);
   background-color: rgba(244, 63, 94, 0.08);
 }
+
+/* Accordion Form */
+.expandable-header {
+  cursor: pointer;
+  user-select: none;
+}
+.expand-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition-fast);
+}
+.expandable-header:hover .expand-btn {
+  color: var(--text-primary);
+}
+.form-collapsible-content {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 1rem;
+  animation: feedbackSlideIn 0.3s ease;
+}
+
+/* Expanded Row Styles */
+.grouped-row {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+.grouped-row:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+.grouped-row.expanded {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+.w-10 {
+  width: 2.5rem;
+}
+.chevron-cell {
+  text-align: center;
+}
+.sub-table-row {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+.sub-table-container {
+  padding: 1.5rem;
+  border-left: 2px solid var(--color-primary);
+  margin-left: 1rem;
+}
+.sub-title {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+/* Mini Table */
+.mini-ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.mini-ledger-table th {
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.5rem;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  text-align: left;
+}
+.mini-ledger-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.02);
+}
+.text-xs {
+  font-size: 0.75rem !important;
+}
+
+/* Mini Form */
+.mini-transaction-form {
+  border-top: 1px dashed var(--border-color);
+  padding-top: 1rem;
+}
+.mini-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mini-input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  outline: none;
+  flex-grow: 1;
+  min-width: 80px;
+}
+.mini-submit-btn {
+  background-color: var(--color-accent);
+  color: #fff;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.mini-submit-btn:hover {
+  background-color: #4f46e5;
+}
+.max-w-xs {
+  max-width: 20rem;
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

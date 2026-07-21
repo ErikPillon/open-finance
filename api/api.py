@@ -83,7 +83,7 @@ def save_tracked_ticker(ticker: str):
             json.dump(tickers, f)
 
 # --- INGESTION LOGIC ---
-def get_latest_timestamp_db(ticker: str) -> datetime.date:
+def get_latest_timestamp_db(ticker: str):
     url = f"http://{QUESTDB_HOST}:{QUESTDB_REST_PORT}/exec"
     query = f"SELECT max(timestamp) FROM equity_prices WHERE ticker = '{ticker}'"
     try:
@@ -95,39 +95,82 @@ def get_latest_timestamp_db(ticker: str) -> datetime.date:
                 return datetime.datetime.fromisoformat(latest_ts[:10]).date()
     except Exception as e:
         logger.error(f"Database check failed for {ticker}: {e}")
-    return datetime.date(2023, 1, 1) # Lookback limit for new tickers
+    return None # Return None to indicate a new ticker without any existing data
 
 def execute_historical_backfill(ticker: str):
     start_date = get_latest_timestamp_db(ticker)
     today = datetime.date.today()
     
-    if (today - start_date).days <= 1:
-        logger.info(f"Ticker {ticker} is up to date.")
-        return
+    if start_date:
+        if (today - start_date).days <= 1:
+            logger.info(f"Ticker {ticker} is up to date.")
+            return
 
-    logger.info(f"Backfilling {ticker} from {start_date} to {today}")
-    try:
-        data = yf.download(ticker, start=start_date.strftime("%Y-%m-%d"), end=today.strftime("%Y-%m-%d"), interval="1d", progress=False)
-        if data.empty: return
+        logger.info(f"Backfilling {ticker} from {start_date} to {today}")
+        try:
+            data = yf.download(ticker, start=start_date.strftime("%Y-%m-%d"), end=today.strftime("%Y-%m-%d"), interval="1d", progress=False)
+            if data.empty: return
 
-        with Sender.from_conf(f"tcp::addr={QUESTDB_HOST}:{QUESTDB_ILP_PORT};") as sender:
-            for timestamp, row in data.dropna().iterrows():
-                sender.row(
-                    'equity_prices',
-                    symbols={'ticker': ticker},
-                    columns={
-                        'open': float(row['Open'].iloc[0] if isinstance(row['Open'], pd.Series) else row['Open']),
-                        'high': float(row['High'].iloc[0] if isinstance(row['High'], pd.Series) else row['High']),
-                        'low': float(row['Low'].iloc[0] if isinstance(row['Low'], pd.Series) else row['Low']),
-                        'close': float(row['Close'].iloc[0] if isinstance(row['Close'], pd.Series) else row['Close']),
-                        'volume': int(row['Volume'].iloc[0] if isinstance(row['Volume'], pd.Series) else row['Volume'])
-                    },
-                    at=timestamp.to_pydatetime()
-                )
-            sender.flush()
-        logger.info(f"Backfill complete for {ticker}.")
-    except Exception as e:
-        logger.error(f"Backfill failed for {ticker}: {e}")
+            with Sender.from_conf(f"tcp::addr={QUESTDB_HOST}:{QUESTDB_ILP_PORT};") as sender:
+                for timestamp, row in data.dropna().iterrows():
+                    sender.row(
+                        'equity_prices',
+                        symbols={'ticker': ticker},
+                        columns={
+                            'open': float(row['Open'].iloc[0] if isinstance(row['Open'], pd.Series) else row['Open']),
+                            'high': float(row['High'].iloc[0] if isinstance(row['High'], pd.Series) else row['High']),
+                            'low': float(row['Low'].iloc[0] if isinstance(row['Low'], pd.Series) else row['Low']),
+                            'close': float(row['Close'].iloc[0] if isinstance(row['Close'], pd.Series) else row['Close']),
+                            'volume': int(row['Volume'].iloc[0] if isinstance(row['Volume'], pd.Series) else row['Volume'])
+                        },
+                        at=timestamp.to_pydatetime()
+                    )
+                sender.flush()
+            logger.info(f"Backfill complete for {ticker}.")
+        except Exception as e:
+            logger.error(f"Backfill failed for {ticker}: {e}")
+    else:
+        # Full historical backfill in chunks going backwards
+        logger.info(f"Starting chunked historical backfill for new ticker {ticker}")
+        end_date = today
+        while True:
+            chunk_start = end_date - datetime.timedelta(days=365 * 5)
+            if chunk_start.year < 1970:
+                chunk_start = datetime.date(1970, 1, 1)
+                
+            logger.info(f"Downloading {ticker} chunk from {chunk_start} to {end_date}")
+            try:
+                data = yf.download(ticker, start=chunk_start.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"), interval="1d", progress=False)
+                if data.empty:
+                    logger.info(f"No more historical data found for {ticker} before {end_date}.")
+                    break
+                    
+                with Sender.from_conf(f"tcp::addr={QUESTDB_HOST}:{QUESTDB_ILP_PORT};") as sender:
+                    for timestamp, row in data.dropna().iterrows():
+                        sender.row(
+                            'equity_prices',
+                            symbols={'ticker': ticker},
+                            columns={
+                                'open': float(row['Open'].iloc[0] if isinstance(row['Open'], pd.Series) else row['Open']),
+                                'high': float(row['High'].iloc[0] if isinstance(row['High'], pd.Series) else row['High']),
+                                'low': float(row['Low'].iloc[0] if isinstance(row['Low'], pd.Series) else row['Low']),
+                                'close': float(row['Close'].iloc[0] if isinstance(row['Close'], pd.Series) else row['Close']),
+                                'volume': int(row['Volume'].iloc[0] if isinstance(row['Volume'], pd.Series) else row['Volume'])
+                            },
+                            at=timestamp.to_pydatetime()
+                        )
+                    sender.flush()
+                logger.info(f"Chunk backfill complete for {ticker} ({chunk_start} to {end_date}).")
+                
+                if chunk_start.year <= 1970:
+                    break
+                    
+                end_date = chunk_start
+                time.sleep(2) # brief pause to avoid overusing the yfinance API
+                
+            except Exception as e:
+                logger.error(f"Chunked backfill failed for {ticker}: {e}")
+                break
 
 def scheduled_batch_ingest():
     tickers = load_tracked_tickers()
@@ -157,6 +200,28 @@ def scheduled_batch_ingest():
 def get_tickers():
     return load_tracked_tickers()
 
+@app.get("/api/latest_prices")
+def get_latest_prices(tickers: str = Query(...)):
+    ticker_list = [t.strip().upper() for t in tickers.split(',')]
+    try:
+        data = yf.download(ticker_list, period="1d", progress=False)
+        if data.empty:
+            raise HTTPException(status_code=404, detail="No price data found.")
+        
+        prices = {}
+        if len(ticker_list) == 1:
+            prices[ticker_list[0]] = float(data['Close'].iloc[-1].item() if isinstance(data['Close'].iloc[-1], pd.Series) else data['Close'].iloc[-1])
+        else:
+            for t in ticker_list:
+                if t in data['Close'] and not pd.isna(data['Close'][t].iloc[-1]):
+                    prices[t] = float(data['Close'][t].iloc[-1].item() if isinstance(data['Close'][t].iloc[-1], pd.Series) else data['Close'][t].iloc[-1])
+        return prices
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch latest prices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/data")
 def get_financial_data(background_tasks: BackgroundTasks, tickers: str = Query(...), limit: int = 100, resolution: str = "1d"):
     # Accepts comma separated tickers e.g., ?tickers=AAPL,SPY
@@ -168,11 +233,15 @@ def get_financial_data(background_tasks: BackgroundTasks, tickers: str = Query(.
         if t not in tracked:
             try:
                 # Basic validation that it's a real ticker
-                if not yf.Ticker(t).history(period="1d").empty:
-                    save_tracked_ticker(t)
-                    background_tasks.add_task(execute_historical_backfill, t)
+                if yf.Ticker(t).history(period="1d").empty:
+                    raise HTTPException(status_code=404, detail=f"Ticker {t} not found on yfinance.")
+                save_tracked_ticker(t)
+                background_tasks.add_task(execute_historical_backfill, t)
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.warning(f"Failed to auto-track {t}: {e}")
+                logger.error(f"Failed to auto-track {t}: {e}")
+                raise HTTPException(status_code=404, detail=f"Ticker {t} not found or invalid.")
 
     ticker_filter = ",".join([f"'{t}'" for t in ticker_list])
     
@@ -206,9 +275,12 @@ def track_new_ticker(ticker: str, background_tasks: BackgroundTasks):
     
     try:
         if yf.Ticker(ticker_upper).history(period="1d").empty:
-            raise ValueError()
-    except:
-        raise HTTPException(status_code=404, detail="Ticker not found.")
+            raise HTTPException(status_code=404, detail=f"Ticker {ticker_upper} not found on yfinance.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to validate {ticker_upper}: {e}")
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker_upper} not found or invalid.")
     
     save_tracked_ticker(ticker_upper)
     background_tasks.add_task(execute_historical_backfill, ticker_upper)

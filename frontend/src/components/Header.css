@@ -4,7 +4,7 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
-  padding: 1.25rem 1.5rem;
+  padding: 1rem;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
@@ -16,6 +16,7 @@
   .terminal-header {
     flex-direction: row;
     align-items: center;
+    padding: 1.25rem 1.5rem;
   }
 }
 

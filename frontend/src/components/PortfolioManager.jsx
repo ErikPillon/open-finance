@@ -1,19 +1,36 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Briefcase, Plus, Trash2, Calendar, DollarSign, RefreshCw, ShoppingCart, TrendingUp } from 'lucide-react';
+import { Briefcase, Plus, Trash2, Calendar, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
+import initialTransactions from '../parsed_transactions.json';
 import './PortfolioManager.css';
 
-/**
- * PortfolioManager Component
- * Allows users to log Buy/Sell transactions, persists them in LocalStorage,
- * and dynamically calculates cost basis, holdings, current value, and profit/loss.
- */
 export default function PortfolioManager({ trackedTickers, telemetryData, apiBase, onTrackNewTicker }) {
   const [transactions, setTransactions] = useState(() => {
     const saved = localStorage.getItem('litefi_portfolio_transactions');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.length > 0) {
+        // Map names from initial JSON to fix previously cached transactions missing the name
+        const nameMap = {};
+        (initialTransactions || []).forEach(t => {
+          if (t.name && t.name !== t.ticker) {
+            nameMap[t.ticker.toUpperCase()] = t.name;
+          }
+        });
+        
+        return parsed.map(tx => ({
+          ...tx,
+          name: tx.name && tx.name !== tx.ticker ? tx.name : (nameMap[tx.ticker.toUpperCase()] || tx.ticker)
+        }));
+      }
+    }
+    return initialTransactions || [];
   });
 
-  // Form State
+  // UI State
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [expandedRow, setExpandedRow] = useState(null);
+
+  // Main Form State
   const [ticker, setTicker] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().substring(0, 10));
   const [quantity, setQuantity] = useState('');
@@ -21,38 +38,56 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
   const [type, setType] = useState('BUY'); // BUY or SELL
   const [formError, setFormError] = useState('');
 
+  // Mini Form State (per expanded row)
+  const [miniDate, setMiniDate] = useState(() => new Date().toISOString().substring(0, 10));
+  const [miniQty, setMiniQty] = useState('');
+  const [miniPrice, setMiniPrice] = useState('');
+  const [miniType, setMiniType] = useState('BUY');
+  const [miniFormError, setMiniFormError] = useState('');
+
   // Persist transactions
   useEffect(() => {
     localStorage.setItem('litefi_portfolio_transactions', JSON.stringify(transactions));
   }, [transactions]);
 
-  // Extract latest prices from telemetry data
-  const latestPrices = useMemo(() => {
-    const prices = {};
-    if (!telemetryData || telemetryData.length === 0) return prices;
+  // Live Prices State
+  const [livePrices, setLivePrices] = useState({});
+  const [priceError, setPriceError] = useState('');
 
-    // Group by ticker and find the latest timestamped record
-    const grouped = {};
-    telemetryData.forEach(item => {
-      if (!grouped[item.ticker]) {
-        grouped[item.ticker] = [];
+  const uniqueTickers = useMemo(() => {
+    return Array.from(new Set(transactions.map(tx => tx.ticker.toUpperCase())));
+  }, [transactions]);
+
+  useEffect(() => {
+    if (uniqueTickers.length === 0) return;
+    let isMounted = true;
+    const fetchPrices = async () => {
+      try {
+        setPriceError('');
+        const res = await fetch(`${apiBase}/latest_prices?tickers=${uniqueTickers.join(',')}`);
+        if (!res.ok) {
+           throw new Error('Failed to fetch from API');
+        }
+        const data = await res.json();
+        if (isMounted) setLivePrices(data);
+      } catch (err) {
+        console.error(err);
+        if (isMounted) setPriceError('Unable to sync live market prices.');
       }
-      grouped[item.ticker].push(item);
-    });
-
-    Object.keys(grouped).forEach(symbol => {
-      const sorted = grouped[symbol].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      prices[symbol] = sorted[0].close;
-    });
-
-    return prices;
-  }, [telemetryData]);
+    };
+    fetchPrices();
+    
+    const interval = setInterval(fetchPrices, 60000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [uniqueTickers, apiBase]);
 
   // Dynamically calculate Holdings
   const holdings = useMemo(() => {
     const map = {};
 
-    // Sort chronologically to properly account for buys and sells
     const sortedTx = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
 
     sortedTx.forEach((tx) => {
@@ -60,10 +95,11 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
       if (!map[sym]) {
         map[sym] = {
           ticker: sym,
+          name: tx.name || sym,
           shares: 0,
-          totalCost: 0, // Total buy cost remaining
+          totalCost: 0,
           realizedPnL: 0,
-          buyTransactions: []
+          history: [] // store all txs for this asset
         };
       }
 
@@ -71,31 +107,37 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
       const qty = parseFloat(tx.quantity);
       const prc = parseFloat(tx.price);
 
+      // Save name if not present and available in tx
+      if (tx.name && holding.name === sym) {
+         holding.name = tx.name;
+      }
+
+      holding.history.push(tx);
+
       if (tx.type === 'BUY') {
         holding.shares += qty;
         holding.totalCost += qty * prc;
-        holding.buyTransactions.push({ qty, prc });
       } else {
-        // Sell transaction
         holding.shares -= qty;
-        // Adjust cost basis and realize gain/loss
         const avgBuyPrice = holding.shares + qty > 0 ? (holding.totalCost / (holding.shares + qty)) : 0;
         holding.totalCost -= qty * avgBuyPrice;
         holding.realizedPnL += qty * (prc - avgBuyPrice);
       }
     });
 
-    // Clean up empty/dust holdings and attach real-time market stats
     return Object.values(map)
       .map((holding) => {
-        if (holding.shares <= 0) return null;
+        if (holding.shares <= 0.00001 && holding.history.length === 0) return null;
 
-        const currentPrice = latestPrices[holding.ticker] || null;
-        const avgPrice = holding.shares > 0 ? (holding.totalCost / holding.shares) : 0;
-        const currentValue = currentPrice ? holding.shares * currentPrice : holding.totalCost;
-        const totalCostBasis = holding.shares * avgPrice;
+        const currentPrice = livePrices[holding.ticker] || null;
+        const avgPrice = holding.shares > 0.00001 ? (holding.totalCost / holding.shares) : 0;
+        const currentValue = (holding.shares > 0.00001 && currentPrice) ? holding.shares * currentPrice : holding.totalCost;
+        const totalCostBasis = holding.shares > 0.00001 ? holding.shares * avgPrice : 0;
         const pnl = currentPrice ? currentValue - totalCostBasis : 0;
         const pnlPercent = totalCostBasis > 0 ? (pnl / totalCostBasis) * 100 : 0;
+
+        // Clean up floating point precision on shares
+        holding.shares = Math.abs(holding.shares) < 0.00001 ? 0 : holding.shares;
 
         return {
           ...holding,
@@ -108,14 +150,16 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
         };
       })
       .filter(Boolean);
-  }, [transactions, latestPrices]);
+  }, [transactions, livePrices]);
 
-  // Global Portfolio Performance Stats
+  const activeHoldings = useMemo(() => holdings.filter(h => h.shares > 0), [holdings]);
+  const closedHoldings = useMemo(() => holdings.filter(h => h.shares <= 0), [holdings]);
+
   const portfolioSummary = useMemo(() => {
     let totalCostBasis = 0;
     let totalCurrentValue = 0;
 
-    holdings.forEach((h) => {
+    activeHoldings.forEach((h) => {
       totalCostBasis += h.totalCostBasis;
       totalCurrentValue += h.currentValue;
     });
@@ -131,7 +175,7 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
     };
   }, [holdings]);
 
-  // Form submission handler
+  // Main Form handler
   const handleAddTransaction = (e) => {
     e.preventDefault();
     setFormError('');
@@ -140,36 +184,21 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
     const parsedQty = parseFloat(quantity);
     const parsedPrice = parseFloat(price);
 
-    if (!formattedTicker) {
-      setFormError('Please provide a ticker.');
-      return;
-    }
-    if (isNaN(parsedQty) || parsedQty <= 0) {
-      setFormError('Quantity must be a positive number.');
-      return;
-    }
-    if (isNaN(parsedPrice) || parsedPrice <= 0) {
-      setFormError('Price must be a positive number.');
-      return;
-    }
-    if (!date) {
-      setFormError('Please select a transaction date.');
-      return;
-    }
+    if (!formattedTicker) return setFormError('Please provide a ticker.');
+    if (isNaN(parsedQty) || parsedQty <= 0) return setFormError('Quantity must be a positive number.');
+    if (isNaN(parsedPrice) || parsedPrice <= 0) return setFormError('Price must be a positive number.');
+    if (!date) return setFormError('Please select a transaction date.');
 
-    // Check for short selling bounds (cannot sell more than holding shares)
     if (type === 'SELL') {
       const existingHolding = holdings.find(h => h.ticker === formattedTicker);
       const currentShares = existingHolding ? existingHolding.shares : 0;
-      if (parsedQty > currentShares) {
-        setFormError(`Insufficient shares. You only own ${currentShares} of ${formattedTicker}.`);
-        return;
-      }
+      if (parsedQty > currentShares) return setFormError(`Insufficient shares. You only own ${currentShares} of ${formattedTicker}.`);
     }
 
     const newTx = {
       id: Date.now().toString(),
       ticker: formattedTicker,
+      name: formattedTicker, // Main form doesn't know the exact name initially unless fetched
       date,
       quantity: parsedQty,
       price: parsedPrice,
@@ -177,44 +206,81 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
     };
 
     setTransactions((prev) => [newTx, ...prev]);
-    
-    // Auto trigger ingestion if the ticker is brand new to the system
     if (!trackedTickers.includes(formattedTicker)) {
       onTrackNewTicker(formattedTicker);
     }
 
-    // Reset inputs
-    setTicker('');
-    setQuantity('');
-    setPrice('');
-    setType('BUY');
+    setTicker(''); setQuantity(''); setPrice(''); setType('BUY'); setIsFormOpen(false);
   };
 
-  // Delete transaction
+  // Mini Form handler for expanded rows
+  const handleAddMiniTransaction = (e, targetTicker, targetName) => {
+    e.preventDefault();
+    setMiniFormError('');
+
+    const parsedQty = parseFloat(miniQty);
+    const parsedPrice = parseFloat(miniPrice);
+
+    if (isNaN(parsedQty) || parsedQty <= 0) return setMiniFormError('Quantity must be a positive number.');
+    if (isNaN(parsedPrice) || parsedPrice <= 0) return setMiniFormError('Price must be a positive number.');
+    if (!miniDate) return setMiniFormError('Please select a transaction date.');
+
+    if (miniType === 'SELL') {
+      const existingHolding = holdings.find(h => h.ticker === targetTicker);
+      const currentShares = existingHolding ? existingHolding.shares : 0;
+      if (parsedQty > currentShares) return setMiniFormError(`Insufficient shares.`);
+    }
+
+    const newTx = {
+      id: Date.now().toString(),
+      ticker: targetTicker,
+      name: targetName,
+      date: miniDate,
+      quantity: parsedQty,
+      price: parsedPrice,
+      type: miniType
+    };
+
+    setTransactions((prev) => [newTx, ...prev]);
+    setMiniQty(''); setMiniPrice(''); setMiniType('BUY');
+  };
+
   const handleDeleteTransaction = (id) => {
     setTransactions((prev) => prev.filter((tx) => tx.id !== id));
   };
 
+  const toggleRow = (targetTicker) => {
+    if (expandedRow === targetTicker) {
+      setExpandedRow(null);
+    } else {
+      setExpandedRow(targetTicker);
+      setMiniFormError('');
+      setMiniQty('');
+      setMiniPrice('');
+      setMiniType('BUY');
+    }
+  };
+
   return (
     <div className="portfolio-manager-container animate-fade-in">
-      {/* 1. Portfolio Performance Panel */}
+      {priceError && (
+        <div className="form-error-alert" style={{ marginBottom: '1rem' }}>
+          {priceError}
+        </div>
+      )}
       <div className="portfolio-summary-row">
         <div className="summary-card glass">
           <span className="summary-card-label">Net Portfolio Value</span>
           <h2 className="summary-card-val font-mono">
             ${portfolioSummary.totalCurrentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </h2>
-          <span className="summary-card-desc">Real-time asset balance</span>
         </div>
-
         <div className="summary-card glass">
           <span className="summary-card-label">Total Cost Basis</span>
           <h2 className="summary-card-val font-mono">
             ${portfolioSummary.totalCostBasis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </h2>
-          <span className="summary-card-desc">Aggregate invested capital</span>
         </div>
-
         <div className="summary-card glass">
           <span className="summary-card-label">Unrealized Performance</span>
           <h2 className={`summary-card-val font-mono ${portfolioSummary.totalPnL >= 0 ? 'positive' : 'negative'}`}>
@@ -227,106 +293,64 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
         </div>
       </div>
 
-      <div className="portfolio-main-grid">
-        {/* 2. Interactive Google Finance Transaction Entry Form */}
+      <div className="portfolio-main-stack">
+        
+        {/* Disappearing Transaction Form */}
         <div className="portfolio-form-panel panel glass">
-          <div className="panel-header">
+          <div 
+            className="panel-header expandable-header" 
+            onClick={() => setIsFormOpen(!isFormOpen)}
+          >
             <h3 className="panel-title">
               <Plus size={16} className="title-icon-primary" />
-              <span>Log Transaction</span>
+              <span>Log New Generic Asset</span>
             </h3>
-          </div>
-          <p className="panel-desc">
-            Manually append buys and sells. Custom tickers are auto-ingested into the QuestDB background backfiller.
-          </p>
-
-          <form onSubmit={handleAddTransaction} className="portfolio-form">
-            <div className="form-row-type">
-              <button
-                type="button"
-                className={`type-btn btn-buy ${type === 'BUY' ? 'active' : ''}`}
-                onClick={() => setType('BUY')}
-              >
-                Buy (Long)
-              </button>
-              <button
-                type="button"
-                className={`type-btn btn-sell ${type === 'SELL' ? 'active' : ''}`}
-                onClick={() => setType('SELL')}
-              >
-                Sell (Short)
-              </button>
-            </div>
-
-            <div className="form-group">
-              <label>Asset Ticker</label>
-              <input
-                type="text"
-                placeholder="e.g. AAPL, TSLA"
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
-                className="form-input"
-                list="tracked-symbols"
-                required
-              />
-              <datalist id="tracked-symbols">
-                {trackedTickers.map(t => <option key={t} value={t} />)}
-              </datalist>
-            </div>
-
-            <div className="form-grid-two">
-              <div className="form-group">
-                <label>Shares (Quantity)</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="0.00"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="form-input"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Price ($ USD)</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="0.00"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  className="form-input"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label>Transaction Date</label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="form-input"
-                required
-              />
-            </div>
-
-            {formError && <div className="form-error-alert">{formError}</div>}
-
-            <button type="submit" className="form-submit-btn">
-              Add to Portfolio
+            <button className="expand-btn">
+              {isFormOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
             </button>
-          </form>
+          </div>
+          
+          {isFormOpen && (
+            <div className="form-collapsible-content">
+              <p className="panel-desc mt-2">
+                Manually append buys and sells for new assets not yet in your holdings.
+              </p>
+              <form onSubmit={handleAddTransaction} className="portfolio-form">
+                <div className="form-row-type">
+                  <button type="button" className={`type-btn btn-buy ${type === 'BUY' ? 'active' : ''}`} onClick={() => setType('BUY')}>Buy (Long)</button>
+                  <button type="button" className={`type-btn btn-sell ${type === 'SELL' ? 'active' : ''}`} onClick={() => setType('SELL')}>Sell (Short)</button>
+                </div>
+                <div className="form-group">
+                  <label>Asset Ticker / ISIN</label>
+                  <input type="text" value={ticker} onChange={(e) => setTicker(e.target.value)} className="form-input" required />
+                </div>
+                <div className="form-grid-two">
+                  <div className="form-group">
+                    <label>Shares (Quantity)</label>
+                    <input type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} className="form-input" required />
+                  </div>
+                  <div className="form-group">
+                    <label>Price ($ USD)</label>
+                    <input type="number" step="any" value={price} onChange={(e) => setPrice(e.target.value)} className="form-input" required />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Transaction Date</label>
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="form-input" required />
+                </div>
+                {formError && <div className="form-error-alert">{formError}</div>}
+                <button type="submit" className="form-submit-btn">Add to Portfolio</button>
+              </form>
+            </div>
+          )}
         </div>
 
-        {/* 3. holdings Table */}
+        {/* Holdings Table */}
         <div className="holdings-panel panel glass">
           <div className="panel-header">
             <h3 className="panel-title">
               <Briefcase size={16} className="title-icon-primary" />
-              <span>Current Holdings</span>
+              <span>Current Holdings & Ledger</span>
             </h3>
           </div>
 
@@ -334,45 +358,109 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
             <table className="portfolio-table">
               <thead>
                 <tr>
+                  <th className="w-10"></th>
                   <th>Symbol</th>
+                  <th>Asset Name</th>
                   <th className="align-right">Qty Owned</th>
-                  <th className="align-right">Avg Buy Price</th>
+                  <th className="align-right">Avg Price</th>
                   <th className="align-right">Last Price</th>
-                  <th className="align-right">Market Value</th>
                   <th className="align-right text-right-pnl">Total Returns</th>
                 </tr>
               </thead>
               <tbody>
-                {holdings.map((h) => {
+                {activeHoldings.map((h) => {
                   const isPos = h.pnl >= 0;
+                  const isExpanded = expandedRow === h.ticker;
+                  
                   return (
-                    <tr key={h.ticker} className="table-row">
-                      <td>
-                        <div className="table-ticker-cell">
-                          <span className="ticker-color-box" style={{ backgroundColor: h.color }} />
-                          <span className="ticker-label font-mono">{h.ticker}</span>
-                        </div>
-                      </td>
-                      <td className="align-right font-mono">{h.shares.toLocaleString()}</td>
-                      <td className="align-right font-mono">${h.avgPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td className="align-right font-mono text-muted">
-                        {h.currentPrice ? `$${h.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Syncing...'}
-                      </td>
-                      <td className="align-right font-mono">${h.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td className={`align-right font-mono ${isPos ? 'positive' : 'negative'}`}>
-                        <div className="table-pnl-cell">
-                          <span>{isPos ? '+' : ''}${h.pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          <span className="table-pnl-pct">({h.pnlPercent.toFixed(2)}%)</span>
-                        </div>
-                      </td>
-                    </tr>
+                    <React.Fragment key={h.ticker}>
+                      <tr className={`table-row grouped-row ${isExpanded ? 'expanded' : ''}`} onClick={() => toggleRow(h.ticker)}>
+                        <td className="w-10 chevron-cell">
+                          {isExpanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
+                        </td>
+                        <td>
+                          <div className="table-ticker-cell">
+                            <span className="ticker-label font-mono">{h.ticker}</span>
+                          </div>
+                        </td>
+                        <td className="text-muted text-sm max-w-xs truncate" title={h.name}>{h.name}</td>
+                        <td className="align-right font-mono">{h.shares.toLocaleString()}</td>
+                        <td className="align-right font-mono">${h.avgPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="align-right font-mono text-muted">
+                          {h.currentPrice 
+                            ? `$${h.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+                            : priceError ? 'Fetch Failed' : 'Syncing...'}
+                        </td>
+                        <td className={`align-right font-mono ${isPos ? 'positive' : 'negative'}`}>
+                          <div className="table-pnl-cell">
+                            <span>{isPos ? '+' : ''}${h.pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span className="table-pnl-pct">({h.pnlPercent.toFixed(2)}%)</span>
+                          </div>
+                        </td>
+                      </tr>
+                      
+                      {isExpanded && (
+                        <tr className="sub-table-row">
+                          <td colSpan="7" className="p-0">
+                            <div className="sub-table-container">
+                              <h4 className="sub-title font-mono">Ledger: {h.name}</h4>
+                              <table className="mini-ledger-table">
+                                <thead>
+                                  <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th className="align-right">Quantity</th>
+                                    <th className="align-right">Price</th>
+                                    <th className="align-right">Value</th>
+                                    <th></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {h.history.sort((a,b) => new Date(b.date) - new Date(a.date)).map(tx => (
+                                    <tr key={tx.id}>
+                                      <td className="font-mono text-muted text-xs">{tx.date}</td>
+                                      <td>
+                                        <span className={`ledger-type-badge ${tx.type === 'BUY' ? 'type-buy' : 'type-sell'} text-xs`}>
+                                          {tx.type}
+                                        </span>
+                                      </td>
+                                      <td className="align-right font-mono text-xs">{tx.quantity}</td>
+                                      <td className="align-right font-mono text-xs">${parseFloat(tx.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                      <td className="align-right font-mono text-xs">${(tx.quantity * tx.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                      <td className="align-center">
+                                        <button onClick={() => handleDeleteTransaction(tx.id)} className="ledger-delete-btn"><Trash2 size={12} /></button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+
+                              <div className="mini-transaction-form mt-4">
+                                <h4 className="sub-title mb-2">Register New Transaction</h4>
+                                <form onSubmit={(e) => handleAddMiniTransaction(e, h.ticker, h.name)} className="mini-form">
+                                  <select value={miniType} onChange={(e) => setMiniType(e.target.value)} className="mini-input">
+                                    <option value="BUY">BUY</option>
+                                    <option value="SELL">SELL</option>
+                                  </select>
+                                  <input type="number" step="any" placeholder="Qty" value={miniQty} onChange={(e) => setMiniQty(e.target.value)} className="mini-input" required />
+                                  <input type="number" step="any" placeholder="Price $" value={miniPrice} onChange={(e) => setMiniPrice(e.target.value)} className="mini-input" required />
+                                  <input type="date" value={miniDate} onChange={(e) => setMiniDate(e.target.value)} className="mini-input" required />
+                                  <button type="submit" className="mini-submit-btn">Add</button>
+                                </form>
+                                {miniFormError && <div className="form-error-alert text-xs mt-2">{miniFormError}</div>}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
 
-                {holdings.length === 0 && (
+                {activeHoldings.length === 0 && (
                   <tr>
-                    <td colSpan="6" className="table-empty-row">
-                      No active assets. Log a buy transaction on the left to initialize holdings.
+                    <td colSpan="7" className="table-empty-row">
+                      No active assets. Log a buy transaction above to initialize holdings.
                     </td>
                   </tr>
                 )}
@@ -380,69 +468,51 @@ export default function PortfolioManager({ trackedTickers, telemetryData, apiBas
             </table>
           </div>
         </div>
-      </div>
 
-      {/* 4. Ledger logs (Google Finance Style) */}
-      <div className="ledger-panel panel glass">
-        <div className="panel-header">
-          <h3 className="panel-title">
-            <Calendar size={16} className="title-icon-primary" />
-            <span>Transaction Registry Logs</span>
-          </h3>
-          <span className="ticker-count-badge font-mono">{transactions.length} records</span>
-        </div>
-
-        <div className="table-viewport">
-          <table className="portfolio-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Symbol</th>
-                <th>Action</th>
-                <th className="align-right">Quantity</th>
-                <th className="align-right">Execution Price</th>
-                <th className="align-right">Total Net Cash</th>
-                <th className="align-center">Discard</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((tx) => {
-                const total = parseFloat(tx.quantity) * parseFloat(tx.price);
-                return (
-                  <tr key={tx.id} className="ledger-row">
-                    <td className="font-mono text-muted">{tx.date}</td>
-                    <td className="font-mono font-bold">{tx.ticker}</td>
-                    <td>
-                      <span className={`ledger-type-badge ${tx.type === 'BUY' ? 'type-buy' : 'type-sell'}`}>
-                        {tx.type}
-                      </span>
-                    </td>
-                    <td className="align-right font-mono">{tx.quantity}</td>
-                    <td className="align-right font-mono">${parseFloat(tx.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="align-right font-mono">${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="align-center">
-                      <button
-                        onClick={() => handleDeleteTransaction(tx.id)}
-                        className="ledger-delete-btn"
-                        title="Delete record"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
+        {/* Closed Positions */}
+        {closedHoldings.length > 0 && (
+          <div className="holdings-panel panel glass" style={{ marginTop: '1.5rem' }}>
+            <div className="panel-header">
+              <h3 className="panel-title">
+                <Briefcase size={16} className="title-icon-primary" />
+                <span>Closed Positions (Past Holdings)</span>
+              </h3>
+            </div>
+            <div className="table-viewport">
+              <table className="portfolio-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Asset Name</th>
+                    <th className="align-right">Qty Owned</th>
+                    <th className="align-right text-right-pnl">Realized Gain/Loss</th>
                   </tr>
-                );
-              })}
-
-              {transactions.length === 0 && (
-                <tr>
-                  <td colSpan="7" className="table-empty-row">
-                    The transaction registry ledger is currently empty.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {closedHoldings.map((h) => {
+                    const isPos = h.realizedPnL >= 0;
+                    return (
+                      <tr key={h.ticker} className="table-row">
+                        <td>
+                          <div className="table-ticker-cell">
+                            <span className="ticker-label font-mono">{h.ticker}</span>
+                          </div>
+                        </td>
+                        <td className="text-muted text-sm max-w-xs truncate" title={h.name}>{h.name}</td>
+                        <td className="align-right font-mono">0</td>
+                        <td className={`align-right font-mono ${isPos ? 'positive' : 'negative'}`}>
+                          <div className="table-pnl-cell">
+                            <span>{isPos ? '+' : ''}${h.realizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
