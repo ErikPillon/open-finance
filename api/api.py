@@ -10,7 +10,6 @@ from typing import List
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from questdb.ingress import Sender
-from apscheduler.schedulers.background import BackgroundScheduler
 import uvicorn
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -169,31 +168,8 @@ def execute_historical_backfill(ticker: str):
                 time.sleep(2) # brief pause to avoid overusing the yfinance API
                 
             except Exception as e:
-                logger.error(f"Chunked backfill failed for {ticker}: {e}")
+            logger.error(f"Chunked backfill failed for {ticker}: {e}")
                 break
-
-def scheduled_batch_ingest():
-    tickers = load_tracked_tickers()
-    logger.info(f"Running scheduled ingest for: {tickers}")
-    try:
-        data = yf.download(tickers, period="2d", interval="1h", group_by="ticker", progress=False)
-        with Sender.from_conf(f"tcp::addr={QUESTDB_HOST}:{QUESTDB_ILP_PORT};") as sender:
-            for ticker in tickers:
-                ticker_df = data[ticker].dropna() if len(tickers) > 1 else data.dropna()
-                for timestamp, row in ticker_df.iterrows():
-                    sender.row(
-                        'equity_prices',
-                        symbols={'ticker': ticker},
-                        columns={
-                            'open': float(row['Open']), 'high': float(row['High']),
-                            'low': float(row['Low']), 'close': float(row['Close']),
-                            'volume': int(row['Volume'])
-                        },
-                        at=timestamp.to_pydatetime()
-                    )
-            sender.flush()
-    except Exception as e:
-        logger.error(f"Scheduled ingestion error: {e}")
 
 # --- API ENDPOINTS ---
 @app.get("/api/tickers")
@@ -295,11 +271,6 @@ def startup_event():
     # 2. Trigger initial backfill for existing tickers
     for t in load_tracked_tickers():
         execute_historical_backfill(t)
-
-    # 3. Mount Scheduler
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(scheduled_batch_ingest, 'cron', hour='*', minute='0')
-    scheduler.start()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

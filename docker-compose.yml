@@ -23,6 +23,17 @@ services:
       - ./api:/app
     restart: unless-stopped
 
+  worker:
+    build: ./worker
+    container_name: financial_worker
+    depends_on:
+      - questdb
+      - api
+    environment:
+      - QUESTDB_HOST=questdb
+      - API_HOST=api:8000
+    restart: unless-stopped
+
   frontend:
     build: ./frontend
     container_name: litefi_frontend
