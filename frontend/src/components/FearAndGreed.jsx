@@ -129,9 +129,22 @@ export default function FearAndGreed({ apiBase }) {
     plugins: { legend: { display: false } },
     scales: {
       y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.05)' } },
-      x: { grid: { display: false } }
+      x: { grid: { display: false }, ticks: { display: false } }
     }
   };
+
+  const getSubChartData = (key, color) => ({
+    labels: data.historical_series.map(item => item.date.substring(5)),
+    datasets: [{
+      data: data.historical_series.map(item => item[key]),
+      borderColor: color,
+      borderWidth: 2,
+      pointRadius: 0,
+      fill: true,
+      backgroundColor: `${color}20`,
+      tension: 0.3
+    }]
+  });
 
   return (
     <div className="sentiment-container animate-fade-in">
@@ -145,7 +158,7 @@ export default function FearAndGreed({ apiBase }) {
         </div>
         
         <div className="hist-wrapper">
-          <h3 className="font-mono text-sm text-muted mb-2">30-Day Trend</h3>
+          <h3 className="font-mono text-sm text-muted mb-2">Long-Term Trend</h3>
           <div className="hist-chart-container">
             <Line data={histData} options={histOptions} />
           </div>
@@ -155,34 +168,73 @@ export default function FearAndGreed({ apiBase }) {
       <h3 className="font-mono text-md mt-6 mb-4">Quantitative Sub-Components</h3>
       <div className="sub-grid">
         <div className="sub-card glass panel">
-          <TrendingUp size={20} className="sub-icon text-blue-500" />
-          <h4 className="sub-name">Market Momentum</h4>
-          <span className="sub-val font-mono">{Math.round(data.sub_components.momentum)}/100</span>
+          <div className="sub-card-header">
+            <div className="sub-card-title-group">
+              <TrendingUp size={24} className="sub-icon text-blue-500" />
+              <h4 className="sub-name">Market Momentum</h4>
+            </div>
+            <span className="sub-val font-mono">{Math.round(data.sub_components.momentum)}/100</span>
+          </div>
           <p className="sub-desc">S&P 500 versus its 125-day moving average.</p>
+          <div className="sub-chart-container">
+            <Line data={getSubChartData('momentum', '#3b82f6')} options={histOptions} />
+          </div>
         </div>
+        
         <div className="sub-card glass panel">
-          <Activity size={20} className="sub-icon text-rose-500" />
-          <h4 className="sub-name">Market Volatility</h4>
-          <span className="sub-val font-mono">{Math.round(data.sub_components.volatility)}/100</span>
-          <p className="sub-desc">VIX index compared to its 50-day average.</p>
+          <div className="sub-card-header">
+            <div className="sub-card-title-group">
+              <Activity size={24} className="sub-icon text-rose-500" />
+              <h4 className="sub-name">Market Volatility</h4>
+            </div>
+            <span className="sub-val font-mono">{Math.round(data.sub_components.volatility)}/100</span>
+          </div>
+          <p className="sub-desc">VIX index compared to its 50-day average. (Inverted: Lower volatility = Greed)</p>
+          <div className="sub-chart-container">
+            <Line data={getSubChartData('volatility', '#f43f5e')} options={histOptions} />
+          </div>
         </div>
+        
         <div className="sub-card glass panel">
-          <ShieldAlert size={20} className="sub-icon text-amber-500" />
-          <h4 className="sub-name">Safe Haven Demand</h4>
-          <span className="sub-val font-mono">{Math.round(data.sub_components.safe_haven)}/100</span>
+          <div className="sub-card-header">
+            <div className="sub-card-title-group">
+              <ShieldAlert size={24} className="sub-icon text-amber-500" />
+              <h4 className="sub-name">Safe Haven Demand</h4>
+            </div>
+            <span className="sub-val font-mono">{Math.round(data.sub_components.safe_haven)}/100</span>
+          </div>
           <p className="sub-desc">Difference in 20-day returns of Stocks vs Treasury Bonds.</p>
+          <div className="sub-chart-container">
+            <Line data={getSubChartData('safe_haven', '#f59e0b')} options={histOptions} />
+          </div>
         </div>
+        
         <div className="sub-card glass panel">
-          <AlertTriangle size={20} className="sub-icon text-orange-500" />
-          <h4 className="sub-name">Junk Bond Demand</h4>
-          <span className="sub-val font-mono">{Math.round(data.sub_components.junk_bond)}/100</span>
+          <div className="sub-card-header">
+            <div className="sub-card-title-group">
+              <AlertTriangle size={24} className="sub-icon text-orange-500" />
+              <h4 className="sub-name">Junk Bond Demand</h4>
+            </div>
+            <span className="sub-val font-mono">{Math.round(data.sub_components.junk_bond)}/100</span>
+          </div>
           <p className="sub-desc">Yield spread between junk bonds and safe corporate bonds.</p>
+          <div className="sub-chart-container">
+            <Line data={getSubChartData('junk_bond', '#f97316')} options={histOptions} />
+          </div>
         </div>
+        
         <div className="sub-card glass panel">
-          <BarChart2 size={20} className="sub-icon text-indigo-500" />
-          <h4 className="sub-name">Put/Call Options</h4>
-          <span className="sub-val font-mono">{Math.round(data.sub_components.put_call)}/100</span>
+          <div className="sub-card-header">
+            <div className="sub-card-title-group">
+              <BarChart2 size={24} className="sub-icon text-indigo-500" />
+              <h4 className="sub-name">Put/Call Options</h4>
+            </div>
+            <span className="sub-val font-mono">{Math.round(data.sub_components.put_call)}/100</span>
+          </div>
           <p className="sub-desc">Proxy indicating options market downside protection volume.</p>
+          <div className="sub-chart-container">
+            <Line data={getSubChartData('put_call', '#6366f1')} options={histOptions} />
+          </div>
         </div>
       </div>
     </div>
