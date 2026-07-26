@@ -16,7 +16,7 @@ QUESTDB_ILP_PORT = 9009
 QUESTDB_REST_PORT = 9000
 API_HOST = os.getenv("API_HOST", "financial_api:8000")
 
-FX_BONDS_TICKERS = ['EURUSD=X', 'GBPUSD=X', 'JPY=X', 'INR=X', 'CHF=X', '^TNX', '^IRX', '^TYX', '^FVX']
+FX_BONDS_TICKERS = ['EURUSD=X', 'GBPUSD=X', 'JPY=X', 'INR=X', 'CHF=X', '^TNX', '^IRX', '^TYX', '^FVX', '^GSPC', '^VIX', 'TLT', 'HYG', 'LQD']
 
 def get_api_tickers():
     try:

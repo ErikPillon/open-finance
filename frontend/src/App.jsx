@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Activity, Briefcase } from 'lucide-react';
+import { Activity, Briefcase, Compass } from 'lucide-react';
 import Header from './components/Header.jsx';
 import TickerSelector from './components/TickerSelector.jsx';
 import TickerTracker from './components/TickerTracker.jsx';
 import ChartContainer from './components/ChartContainer.jsx';
 import StatsGrid from './components/StatsGrid.jsx';
 import PortfolioManager from './components/PortfolioManager.jsx';
+import FearAndGreed from './components/FearAndGreed.jsx';
 
 const API_BASE = `http://${window.location.hostname}:8000/api`;
 
@@ -190,9 +191,16 @@ export default function App() {
           <Briefcase size={16} />
           <span>Portfolio Manager</span>
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'sentiment' ? 'active' : ''}`}
+          onClick={() => setActiveTab('sentiment')}
+        >
+          <Compass size={16} />
+          <span>Fear & Greed Index</span>
+        </button>
       </nav>
 
-      {activeTab === 'terminal' ? (
+      {activeTab === 'terminal' && (
         <div className="dashboard-grid animate-fade-in">
           <aside className="sidebar flex flex-col gap-6">
             <TickerSelector
@@ -224,13 +232,19 @@ export default function App() {
             />
           </section>
         </div>
-      ) : (
+      )}
+      
+      {activeTab === 'portfolio' && (
         <PortfolioManager
           trackedTickers={tickers}
           telemetryData={rawData}
           apiBase={API_BASE}
           onTrackNewTicker={handleTrackSuccess}
         />
+      )}
+
+      {activeTab === 'sentiment' && (
+        <FearAndGreed apiBase={API_BASE} />
       )}
     </div>
   );

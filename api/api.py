@@ -249,6 +249,16 @@ def execute_historical_backfill(ticker: str):
                 break
 
 
+from sentiment import calculate_fear_and_greed
+
+@app.get("/api/v1/sentiment/fear-and-greed")
+def get_fear_and_greed():
+    try:
+        return calculate_fear_and_greed()
+    except Exception as e:
+        logger.error(f"Error calculating fear and greed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error calculating sentiment.")
+
 # --- API ENDPOINTS ---
 @app.get("/api/tickers")
 def get_tickers():

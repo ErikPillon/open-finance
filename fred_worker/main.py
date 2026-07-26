@@ -20,7 +20,8 @@ MACRO_INDICATORS = {
     'Unemployment': 'UNRATE',        # Labor Market Health
     'Yield_Curve': 'T10Y2Y',          # 10Y minus 2Y Treasury
     'M2_Money_Supply': 'M2SL',       # M2 Money Supply
-    'Consumer_Sentiment': 'UMCSENT'  # University of Michigan: Consumer Sentiment
+    'Consumer_Sentiment': 'UMCSENT',  # University of Michigan: Consumer Sentiment
+    'Junk_Bond_Spread': 'BAMLH0A0HYM2' # High Yield Index Option-Adjusted Spread
 }
 
 def fetch_and_ingest_fred_data():
