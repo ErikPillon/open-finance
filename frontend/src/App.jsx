@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { Activity, Briefcase, Compass } from 'lucide-react';
 import Header from './components/Header.jsx';
 import TickerSelector from './components/TickerSelector.jsx';
@@ -7,6 +8,7 @@ import ChartContainer from './components/ChartContainer.jsx';
 import StatsGrid from './components/StatsGrid.jsx';
 import PortfolioManager from './components/PortfolioManager.jsx';
 import FearAndGreed from './components/FearAndGreed.jsx';
+import Home from './components/Home.jsx';
 
 const API_BASE = `http://${window.location.hostname}:8000/api`;
 
@@ -22,7 +24,7 @@ const PRESET_COLORS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('terminal'); // 'terminal' or 'portfolio'
+  const location = useLocation();
   const [tickers, setTickers] = useState([]);
   const [selectedTickers, setSelectedTickers] = useState([]);
   const [resolution, setResolution] = useState('1d');
@@ -43,7 +45,7 @@ export default function App() {
     } catch {
       return [];
     }
-  }, [activeTab]);
+  }, [location.pathname]); // Update when navigating to portfolio
 
   // Combined list of tickers that we need to fetch data for
   const tickersToFetch = useMemo(() => {
@@ -167,85 +169,92 @@ export default function App() {
 
   return (
     <div className="app-container">
-      <Header
-        resolution={resolution}
-        setResolution={setResolution}
-        onRefresh={fetchTelemetryData}
-        loading={dataLoading}
-        isApiConnected={isApiConnected}
-      />
-
-      {/* Tab Navigation Menu */}
-      <nav className="tab-navigation">
-        <button
-          className={`tab-btn ${activeTab === 'terminal' ? 'active' : ''}`}
-          onClick={() => setActiveTab('terminal')}
-        >
-          <Activity size={16} />
-          <span>Live Terminal</span>
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'portfolio' ? 'active' : ''}`}
-          onClick={() => setActiveTab('portfolio')}
-        >
-          <Briefcase size={16} />
-          <span>Portfolio Manager</span>
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'sentiment' ? 'active' : ''}`}
-          onClick={() => setActiveTab('sentiment')}
-        >
-          <Compass size={16} />
-          <span>Fear & Greed Index</span>
-        </button>
-      </nav>
-
-      {activeTab === 'terminal' && (
-        <div className="dashboard-grid animate-fade-in">
-          <aside className="sidebar flex flex-col gap-6">
-            <TickerSelector
-              tickers={tickers}
-              selectedTickers={selectedTickers}
-              onToggleTicker={handleToggleTicker}
-              loading={tickersLoading}
-              tickerColors={tickerColors}
-            />
-            <TickerTracker
-              onTrackSuccess={handleTrackSuccess}
-              apiBase={API_BASE}
-            />
-          </aside>
-
-          <section className="main-content flex flex-col gap-6">
-            <ChartContainer
-              rawData={rawData.filter(d => selectedTickers.includes(d.ticker))}
-              selectedTickers={selectedTickers}
-              resolution={resolution}
-              loading={dataLoading}
-              tickerColors={tickerColors}
-            />
-            
-            <StatsGrid
-              rawData={rawData.filter(d => selectedTickers.includes(d.ticker))}
-              selectedTickers={selectedTickers}
-              tickerColors={tickerColors}
-            />
-          </section>
-        </div>
-      )}
-      
-      {activeTab === 'portfolio' && (
-        <PortfolioManager
-          trackedTickers={tickers}
-          telemetryData={rawData}
-          apiBase={API_BASE}
-          onTrackNewTicker={handleTrackSuccess}
+      {location.pathname !== '/' && (
+        <Header
+          resolution={resolution}
+          setResolution={setResolution}
+          onRefresh={fetchTelemetryData}
+          loading={dataLoading}
+          isApiConnected={isApiConnected}
         />
       )}
 
-      {activeTab === 'sentiment' && (
-        <FearAndGreed apiBase={API_BASE} />
+      {location.pathname !== '/' && (
+        <nav className="tab-navigation">
+          <NavLink
+            to="/terminal"
+            className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}
+          >
+            <Activity size={16} />
+            <span>Live Terminal</span>
+          </NavLink>
+          <NavLink
+            to="/portfolio"
+            className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}
+          >
+            <Briefcase size={16} />
+            <span>Portfolio Manager</span>
+          </NavLink>
+          <NavLink
+            to="/sentiment"
+            className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}
+          >
+            <Compass size={16} />
+            <span>Fear & Greed Index</span>
+          </NavLink>
+        </nav>
       )}
+
+      <Routes>
+        <Route path="/" element={<Home />} />
+        
+        <Route path="/terminal" element={
+          <div className="dashboard-grid animate-fade-in">
+            <aside className="sidebar flex flex-col gap-6">
+              <TickerSelector
+                tickers={tickers}
+                selectedTickers={selectedTickers}
+                onToggleTicker={handleToggleTicker}
+                loading={tickersLoading}
+                tickerColors={tickerColors}
+              />
+              <TickerTracker
+                onTrackSuccess={handleTrackSuccess}
+                apiBase={API_BASE}
+              />
+            </aside>
+
+            <section className="main-content flex flex-col gap-6">
+              <ChartContainer
+                rawData={rawData.filter(d => selectedTickers.includes(d.ticker))}
+                selectedTickers={selectedTickers}
+                resolution={resolution}
+                loading={dataLoading}
+                tickerColors={tickerColors}
+              />
+              
+              <StatsGrid
+                rawData={rawData.filter(d => selectedTickers.includes(d.ticker))}
+                selectedTickers={selectedTickers}
+                tickerColors={tickerColors}
+              />
+            </section>
+          </div>
+        } />
+
+        <Route path="/portfolio" element={
+          <PortfolioManager
+            trackedTickers={tickers}
+            telemetryData={rawData}
+            apiBase={API_BASE}
+            onTrackNewTicker={handleTrackSuccess}
+          />
+        } />
+
+        <Route path="/sentiment" element={
+          <FearAndGreed apiBase={API_BASE} />
+        } />
+      </Routes>
     </div>
   );
 }

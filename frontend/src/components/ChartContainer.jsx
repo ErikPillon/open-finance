@@ -1,30 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
+import 'chart.js/auto';
 import { AreaChart, TrendingUp, HelpCircle } from 'lucide-react';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js';
 import './ChartContainer.css';
-
-// Register Chart.js modules
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
 
 const TIME_WINDOWS = ['1D', '1W', '1M', 'YTD', '1Y', '5Y', '10Y', 'All'];
 

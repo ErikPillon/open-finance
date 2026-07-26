@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Line, Doughnut } from 'react-chartjs-2';
+import 'chart.js/auto';
 import { AlertTriangle, TrendingUp, ShieldAlert, BarChart2, Activity } from 'lucide-react';
 import './FearAndGreed.css';
 
